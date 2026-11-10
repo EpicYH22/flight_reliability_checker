@@ -278,3 +278,4 @@ if submitted:
 
     except Exception as e:
         st.error(f"Prediction error: {e}")
+
