@@ -2,9 +2,10 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import calendar
 
 # ==========================================
-# 1. Website configuration
+# 1. Website Configuration
 # ==========================================
 
 st.set_page_config(
@@ -14,24 +15,31 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. Load trained model and dropdowns
+# 2. Load Model and Historical Data
 # ==========================================
 
 @st.cache_resource
 def load_model():
     return joblib.load("flight_model.pkl")
 
+
 @st.cache_resource
 def load_lookups():
     return joblib.load("flight_lookups.pkl")
 
+
+@st.cache_data
+def load_flight_options():
+    return joblib.load("flight_options.pkl")
+
+
 model = load_model()
 lookups = load_lookups()
+flight_options = load_flight_options()
 
 # ==========================================
-# 3. Prediction function
+# 3. Prediction Function
 # ==========================================
-
 
 def predict_flight_reliability(
     month,
@@ -44,7 +52,7 @@ def predict_flight_reliability(
     bad_weather
 ):
 
-    # Retrieve historical carrier information
+    # Retrieve historical airline information
     carrier_data = lookups["carrier"][carrier]
 
     # Retrieve historical state delay rates
@@ -59,7 +67,7 @@ def predict_flight_reliability(
     if distance is None:
         raise ValueError(
             "No historical distance category is available "
-            "for this airline and state pair."
+            "for the selected airline and route."
         )
 
     # Construct all 14 model predictors
@@ -83,10 +91,13 @@ def predict_flight_reliability(
             carrier_data["historical_load_factor"]
     }])
 
-    # Predict probability
+    # Ensure correct model feature order
+    input_data = input_data[list(model.feature_names_in_)]
+
+    # Predict probability of delay
     delay_probability = model.predict_proba(input_data)[0, 1]
 
-    # Calculate reliability score
+    # Calculate Flight Reliability Score
     reliability_score = (1 - delay_probability) * 100
 
     # Assign reliability tier
@@ -98,184 +109,377 @@ def predict_flight_reliability(
         tier = "Low Reliability"
 
     return {
-        "Delay Probability (%)": round(delay_probability * 100, 2),
-        "Reliability Score": round(reliability_score, 2),
+        "Delay Probability (%)": round(
+            delay_probability * 100, 2
+        ),
+        "Reliability Score": round(
+            reliability_score, 2
+        ),
         "Reliability Tier": tier
     }
 
 
 # ==========================================
-# 4. Website header
+# 4. Website Header
 # ==========================================
 
 st.title("✈️ Flight Reliability Checker")
 
 st.write(
-    "Planning your next flight? Enter your flight "
-    "details to estimate the likelihood of a "
-    "departure delay based on historical flight data."
+    "Planning your next flight? Select your airline "
+    "and enter your flight details to estimate "
+    "the probability of a departure delay."
 )
 
 st.divider()
 
 # ==========================================
-# 5. Flight details dropdowns
-# ==========================================
-
-
-# ==========================================
-# Flight Details
+# 5. Flight Details
 # ==========================================
 
 st.subheader("Flight Details")
 
-with st.form("flight_form"):
+# ------------------------------------------
+# 5.1 Airline Selection
+# ------------------------------------------
+
+airlines = sorted(
+    flight_options["op_unique_carrier"]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+carrier = st.selectbox(
+    "Airline Code",
+    airlines,
+    index=None,
+    placeholder="Select an airline",
+    key="carrier"
+)
+
+if carrier is None:
+
+    st.info(
+        "Select an airline to display "
+        "the available flight details."
+    )
+
+else:
+
+    # Filter records for selected airline
+    airline_df = flight_options[
+        flight_options["op_unique_carrier"] == carrier
+    ].copy()
+
+    st.caption(
+        f"Showing historical flight options for {carrier}"
+    )
+
+    # --------------------------------------
+    # 5.2 Available Options
+    # --------------------------------------
+
+    months = sorted(
+        airline_df["month"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    day_types = sorted(
+        airline_df["day_type"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    schedules = sorted(
+        airline_df["schedule"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    origins = sorted(
+        airline_df["origin_state_nm"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    # --------------------------------------
+    # 5.3 Dropdown Interface
+    # --------------------------------------
 
     col1, col2 = st.columns(2)
 
     with col1:
 
-        month_option = st.selectbox(
+        # Departure Month
+        month = st.selectbox(
             "Departure Month",
-            options["months"],
-            format_func=lambda x: x[0]
-        )
-        month = month_option[1]
-
-        carrier = st.selectbox(
-            "Airline",
-            options["carriers"]
+            months,
+            format_func=lambda x:
+                calendar.month_name[int(x)],
+            key="month"
         )
 
-        origin = st.selectbox(
-            "Origin State",
-            options["origins"]
-        )
-
+        # Day Type
         day_type = st.selectbox(
             "Day Type",
-            options["day_types"]
+            day_types,
+            key="day_type"
+        )
+
+        # Origin State
+        origin = st.selectbox(
+            "Origin State",
+            origins,
+            index=None,
+            placeholder="Select origin state",
+            key="origin"
+        )
+
+        # National Holiday
+        holiday = st.selectbox(
+            "National Holiday",
+            [0, 1],
+            format_func=lambda x:
+                "Yes" if x == 1 else "No",
+            key="holiday"
         )
 
     with col2:
 
-        destination = st.selectbox(
-            "Destination State",
-            options["destinations"]
-        )
-
+        # Departure Period
         schedule = st.selectbox(
             "Departure Period",
-            options["schedules"]
+            schedules,
+            key="schedule"
         )
 
-        holiday_option = st.selectbox(
-            "National Holiday",
-            options["holidays"],
-            format_func=lambda x: x[0]
-        )
-        holiday = holiday_option[1]
-
-        bad_weather_label = st.selectbox(
+        # Bad Weather
+        bad_weather = st.selectbox(
             "Bad Weather",
-            ["No", "Yes"]
+            [0, 1],
+            format_func=lambda x:
+                "Yes" if x == 1 else "No",
+            key="bad_weather"
         )
-        bad_weather = 1 if bad_weather_label == "Yes" else 0
 
-    submitted = st.form_submit_button(
-        "Predict Flight Reliability",
-        type="primary",
-        use_container_width=True
+    # --------------------------------------
+    # 5.4 Destination Depends on Origin
+    # --------------------------------------
+
+    if origin is not None:
+
+        route_df = airline_df[
+            airline_df["origin_state_nm"] == origin
+        ]
+
+        destinations = sorted(
+            route_df["dest_state_nm"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+    else:
+        destinations = []
+
+    # Clear previous destination if no longer valid
+    if (
+        "destination" in st.session_state
+        and st.session_state["destination"] not in destinations
+    ):
+        st.session_state["destination"] = None
+
+    destination = st.selectbox(
+        "Destination State",
+        destinations,
+        index=None,
+        placeholder="Select destination state",
+        disabled=(origin is None),
+        key="destination"
     )
 
+    # --------------------------------------
+    # 5.5 Prediction Button
+    # --------------------------------------
 
-# ==========================================
-# 6. Display prediction results
-# ==========================================
+    st.divider()
 
-
-# ==========================================
-# Display Prediction Results
-# ==========================================
-
-if submitted:
-    try:
-        result = predict_flight_reliability(
-            month,
-            carrier,
-            origin,
-            destination,
-            day_type,
-            schedule,
-            holiday,
-            bad_weather
+    submitted = st.button(
+        "Predict Flight Reliability",
+        type="primary",
+        use_container_width=True,
+        disabled=(
+            origin is None
+            or destination is None
         )
+    )
 
-        st.divider()
-        st.subheader("Flight Reliability Results")
+    # ======================================
+    # 6. Prediction Results
+    # ======================================
 
-        # Selected Flight Details
-        with st.expander("Selected Flight Details", expanded=True):
-            st.write(f"**Month:** {month_option[0]}")
-            st.write(f"**Airline:** {carrier}")
-            st.write(f"**Origin:** {origin}")
-            st.write(f"**Destination:** {destination}")
-            st.write(f"**Day Type:** {day_type}")
-            st.write(f"**Departure Period:** {schedule}")
-            st.write(f"**National Holiday:** {holiday_option[0]}")
-            st.write(f"**Bad Weather:** {bad_weather_label}")
+    if submitted:
 
-        # Prediction Metrics
-        col1, col2 = st.columns(2)
+        try:
 
-        with col1:
-            st.metric(
-                "Delay Probability",
-                f"{result['Delay Probability (%)']}%"
+            result = predict_flight_reliability(
+                month,
+                carrier,
+                origin,
+                destination,
+                day_type,
+                schedule,
+                holiday,
+                bad_weather
             )
 
-        with col2:
-            st.metric(
-                "Reliability Score",
-                f"{result['Reliability Score']}/100"
+            st.divider()
+
+            st.subheader(
+                "Flight Reliability Results"
             )
 
-        # Reliability Tier
-        tier = result["Reliability Tier"]
+            # --------------------------------
+            # Selected Flight Details
+            # --------------------------------
 
-        if tier == "High Reliability":
-            st.success("High Reliability")
-            st.write(
-                "This flight has a relatively low "
-                "predicted risk of departure delay."
+            with st.expander(
+                "Selected Flight Details",
+                expanded=True
+            ):
+
+                st.write(
+                    f"**Airline:** {carrier}"
+                )
+
+                st.write(
+                    f"**Month:** "
+                    f"{calendar.month_name[int(month)]}"
+                )
+
+                st.write(
+                    f"**Origin:** {origin}"
+                )
+
+                st.write(
+                    f"**Destination:** {destination}"
+                )
+
+                st.write(
+                    f"**Day Type:** {day_type}"
+                )
+
+                st.write(
+                    f"**Departure Period:** {schedule}"
+                )
+
+                st.write(
+                    f"**National Holiday:** "
+                    f"{'Yes' if holiday == 1 else 'No'}"
+                )
+
+                st.write(
+                    f"**Bad Weather:** "
+                    f"{'Yes' if bad_weather == 1 else 'No'}"
+                )
+
+            # --------------------------------
+            # Prediction Metrics
+            # --------------------------------
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.metric(
+                    "Delay Probability",
+                    f"{result['Delay Probability (%)']}%"
+                )
+
+            with col2:
+
+                st.metric(
+                    "Flight Reliability Score",
+                    f"{result['Reliability Score']}/100"
+                )
+
+            # --------------------------------
+            # Reliability Tier
+            # --------------------------------
+
+            tier = result["Reliability Tier"]
+
+            st.subheader(
+                "Flight Reliability Tier"
             )
 
-        elif tier == "Medium Reliability":
-            st.warning("Medium Reliability")
-            st.write(
-                "This flight has a moderate "
-                "predicted risk of departure delay."
+            if tier == "High Reliability":
+
+                st.success(
+                    "High Reliability"
+                )
+
+                st.write(
+                    "This flight has a relatively "
+                    "low predicted risk of "
+                    "departure delay."
+                )
+
+            elif tier == "Medium Reliability":
+
+                st.warning(
+                    "Medium Reliability"
+                )
+
+                st.write(
+                    "This flight has a moderate "
+                    "predicted risk of "
+                    "departure delay."
+                )
+
+            else:
+
+                st.error(
+                    "Low Reliability"
+                )
+
+                st.write(
+                    "This flight has a relatively "
+                    "high predicted risk of "
+                    "departure delay."
+                )
+
+            # --------------------------------
+            # Reliability Progress Bar
+            # --------------------------------
+
+            st.progress(
+                result["Reliability Score"] / 100
             )
 
-        else:
-            st.error("Low Reliability")
-            st.write(
-                "This flight has a relatively high "
-                "predicted risk of departure delay."
+            # --------------------------------
+            # Disclaimer
+            # --------------------------------
+
+            st.caption(
+                "The Flight Reliability Score is "
+                "calculated using historical flight "
+                "characteristics and predicted delay "
+                "probabilities. It is not a guarantee "
+                "of actual flight performance."
             )
 
-        # Reliability Score Progress Bar
-        st.progress(
-            result["Reliability Score"] / 100
-        )
+        except Exception as e:
 
-        st.caption(
-            "The Flight Reliability Score is based on "
-            "historical flight characteristics and "
-            "predicted delay probabilities. It is not "
-            "a guarantee of actual flight performance."
-        )
+            st.error(
+                f"Prediction error: {e}"
+            )
 
-    except Exception as e:
-        st.error(f"Prediction error: {e}")
+
 
