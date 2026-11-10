@@ -21,22 +21,48 @@ st.set_page_config(
 def load_model():
     return joblib.load("flight_model.pkl")
 
-@st.cache_data
-def load_options():
-    return joblib.load("dropdown_options.pkl")
+@st.cache_resource
+def load_lookups():
+    return joblib.load("flight_lookups.pkl")
 
 model = load_model()
-options = load_options()
+lookups = load_lookups()
 
 # ==========================================
 # 3. Prediction function
 # ==========================================
 
+
 def predict_flight_reliability(
-    month, carrier, origin, destination,
-    day_type, schedule, holiday
+    month,
+    carrier,
+    origin,
+    destination,
+    day_type,
+    schedule,
+    holiday,
+    bad_weather
 ):
 
+    # Retrieve historical carrier information
+    carrier_data = lookups["carrier"][carrier]
+
+    # Retrieve historical state delay rates
+    origin_delay = lookups["origin"][origin]
+    destination_delay = lookups["destination"][destination]
+
+    # Retrieve typical distance category
+    distance = lookups["distance"].get(
+        (carrier, origin, destination)
+    )
+
+    if distance is None:
+        raise ValueError(
+            "No historical distance category is available "
+            "for this airline and state pair."
+        )
+
+    # Construct all 14 model predictors
     input_data = pd.DataFrame([{
         "month": month,
         "op_unique_carrier": carrier,
@@ -44,13 +70,26 @@ def predict_flight_reliability(
         "dest_state_nm": destination,
         "day_type": day_type,
         "schedule": schedule,
-        "is_holiday": holiday
+        "distance_group": distance,
+        "is_holiday": holiday,
+        "bad_weather": bad_weather,
+        "carrier_historical_delay_rate":
+            carrier_data["carrier_historical_delay_rate"],
+        "origin_historical_delay_rate": origin_delay,
+        "destination_historical_delay_rate": destination_delay,
+        "avg_aircraft_seats":
+            carrier_data["avg_aircraft_seats"],
+        "historical_load_factor":
+            carrier_data["historical_load_factor"]
     }])
 
+    # Predict probability
     delay_probability = model.predict_proba(input_data)[0, 1]
 
+    # Calculate reliability score
     reliability_score = (1 - delay_probability) * 100
 
+    # Assign reliability tier
     if reliability_score >= 85:
         tier = "High Reliability"
     elif reliability_score >= 75:
@@ -63,6 +102,7 @@ def predict_flight_reliability(
         "Reliability Score": round(reliability_score, 2),
         "Reliability Tier": tier
     }
+
 
 # ==========================================
 # 4. Website header
@@ -80,6 +120,11 @@ st.divider()
 
 # ==========================================
 # 5. Flight details dropdowns
+# ==========================================
+
+
+# ==========================================
+# Flight Details
 # ==========================================
 
 st.subheader("Flight Details")
@@ -131,18 +176,29 @@ with st.form("flight_form"):
         )
         holiday = holiday_option[1]
 
+        bad_weather_label = st.selectbox(
+            "Bad Weather",
+            ["No", "Yes"]
+        )
+        bad_weather = 1 if bad_weather_label == "Yes" else 0
+
     submitted = st.form_submit_button(
         "Predict Flight Reliability",
         type="primary",
         use_container_width=True
     )
 
+
 # ==========================================
 # 6. Display prediction results
 # ==========================================
 
-if submitted:
 
+# ==========================================
+# Display Prediction Results
+# ==========================================
+
+if submitted:
     try:
         result = predict_flight_reliability(
             month,
@@ -151,14 +207,15 @@ if submitted:
             destination,
             day_type,
             schedule,
-            holiday
+            holiday,
+            bad_weather
         )
 
         st.divider()
-
         st.subheader("Flight Reliability Results")
 
-        with st.expander("Selected Flight Details"):
+        # Selected Flight Details
+        with st.expander("Selected Flight Details", expanded=True):
             st.write(f"**Month:** {month_option[0]}")
             st.write(f"**Airline:** {carrier}")
             st.write(f"**Origin:** {origin}")
@@ -166,7 +223,9 @@ if submitted:
             st.write(f"**Day Type:** {day_type}")
             st.write(f"**Departure Period:** {schedule}")
             st.write(f"**National Holiday:** {holiday_option[0]}")
+            st.write(f"**Bad Weather:** {bad_weather_label}")
 
+        # Prediction Metrics
         col1, col2 = st.columns(2)
 
         with col1:
@@ -181,6 +240,7 @@ if submitted:
                 f"{result['Reliability Score']}/100"
             )
 
+        # Reliability Tier
         tier = result["Reliability Tier"]
 
         if tier == "High Reliability":
@@ -204,6 +264,7 @@ if submitted:
                 "predicted risk of departure delay."
             )
 
+        # Reliability Score Progress Bar
         st.progress(
             result["Reliability Score"] / 100
         )
