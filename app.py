@@ -91,10 +91,10 @@ def predict_flight_reliability(
             carrier_data["historical_load_factor"]
     }])
 
-    # Ensure correct model feature order
+    # Match model feature order
     input_data = input_data[list(model.feature_names_in_)]
 
-    # Predict probability of delay
+    # Predict delay probability
     delay_probability = model.predict_proba(input_data)[0, 1]
 
     # Calculate Flight Reliability Score
@@ -208,9 +208,9 @@ else:
         .tolist()
     )
 
-    # --------------------------------------
-    # 5.3 Dropdown Interface
-    # --------------------------------------
+    # ======================================
+    # 5.3 Two-Column Flight Details
+    # ======================================
 
     col1, col2 = st.columns(2)
 
@@ -232,14 +232,7 @@ else:
             key="day_type"
         )
 
-        # Origin State
-        origin = st.selectbox(
-            "Origin State",
-            origins,
-            index=None,
-            placeholder="Select origin state",
-            key="origin"
-        )
+    with col2:
 
         # National Holiday
         holiday = st.selectbox(
@@ -248,15 +241,6 @@ else:
             format_func=lambda x:
                 "Yes" if x == 1 else "No",
             key="holiday"
-        )
-
-    with col2:
-
-        # Departure Period
-        schedule = st.selectbox(
-            "Departure Period",
-            schedules,
-            key="schedule"
         )
 
         # Bad Weather
@@ -268,9 +252,31 @@ else:
             key="bad_weather"
         )
 
-    # --------------------------------------
-    # 5.4 Destination Depends on Origin
-    # --------------------------------------
+    # ======================================
+    # 5.4 Departure Period - Full Width
+    # ======================================
+
+    schedule = st.selectbox(
+        "Departure Period",
+        schedules,
+        key="schedule"
+    )
+
+    # ======================================
+    # 5.5 Origin State - Full Width
+    # ======================================
+
+    origin = st.selectbox(
+        "Origin State",
+        origins,
+        index=None,
+        placeholder="Select origin state",
+        key="origin"
+    )
+
+    # ======================================
+    # 5.6 Destination State - Full Width
+    # ======================================
 
     if origin is not None:
 
@@ -288,7 +294,7 @@ else:
     else:
         destinations = []
 
-    # Clear previous destination if no longer valid
+    # Reset destination if no longer valid
     if (
         "destination" in st.session_state
         and st.session_state["destination"] not in destinations
@@ -304,9 +310,9 @@ else:
         key="destination"
     )
 
-    # --------------------------------------
-    # 5.5 Prediction Button
-    # --------------------------------------
+    # ======================================
+    # 5.7 Prediction Button
+    # ======================================
 
     st.divider()
 
@@ -480,6 +486,7 @@ else:
             st.error(
                 f"Prediction error: {e}"
             )
+
 
 
 
