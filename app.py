@@ -9,7 +9,7 @@ import calendar
 # ==========================================
 
 st.set_page_config(
-    page_title="Flight Reliability Checker",
+    page_title="Flight Delay Risk Assessment",
     page_icon="✈️",
     layout="centered"
 )
@@ -66,12 +66,47 @@ model_features = [
     "previous_flight_departure_delay"
 ]
 
+required_lookup_keys = {
+    "exact",
+    "route",
+    "carrier",
+    "global",
+    "numerical_features"
+}
+
+missing_lookup_keys = (
+    required_lookup_keys - set(lookups.keys())
+)
+
+if missing_lookup_keys:
+    st.error(
+        "Historical lookup file is outdated. "
+        f"Missing keys: {sorted(missing_lookup_keys)}"
+    )
+    st.stop()
+
+if hasattr(model, "feature_names_in_"):
+    missing_model_features = (
+        set(model_features) -
+        set(model.feature_names_in_)
+    )
+
+    if missing_model_features:
+        st.error(
+            "The saved model does not contain all "
+            "22 expected predictors."
+        )
+        st.stop()
+
 # ==========================================
 # 4. Historical Lookup Function
 # ==========================================
 
 def get_historical_values(
-    carrier, origin, destination, month
+    carrier,
+    origin,
+    destination,
+    month
 ):
 
     exact_key = (
@@ -108,7 +143,6 @@ def get_historical_values(
         + ["distance_group"]
     )
 
-    # Select the most specific available value
     for feature in features:
 
         candidates = [
@@ -121,15 +155,15 @@ def get_historical_values(
         value = next(
             (
                 x for x in candidates
-                if x is not None
-                and pd.notna(x)
+                if x is not None and pd.notna(x)
             ),
             None
         )
 
         if value is None:
             raise ValueError(
-                f"No historical value for {feature}"
+                f"No historical value available "
+                f"for {feature}"
             )
 
         values[feature] = value
@@ -172,7 +206,6 @@ def predict_flight_reliability(
         [input_values]
     )
 
-    # Ensure all model features exist
     missing = [
         col for col in model_features
         if col not in input_data.columns
@@ -185,15 +218,17 @@ def predict_flight_reliability(
 
     input_data = input_data[model_features]
 
-    # Predict delay probability
-    delay_probability = (
+    # Predict probability of delay
+    delay_probability = float(
         model.predict_proba(input_data)[0, 1]
     )
 
+    # Calculate Flight Reliability Score
     reliability_score = (
         1 - delay_probability
     ) * 100
 
+    # Assign reliability tier
     if reliability_score >= 85:
         tier = "High Reliability"
     elif reliability_score >= 75:
@@ -202,10 +237,12 @@ def predict_flight_reliability(
         tier = "Low Reliability"
 
     return {
-        "Delay Probability (%)":
-            round(delay_probability * 100, 2),
-        "Reliability Score":
-            round(reliability_score, 2),
+        "Delay Probability (%)": round(
+            delay_probability * 100, 2
+        ),
+        "Reliability Score": round(
+            reliability_score, 2
+        ),
         "Reliability Tier": tier
     }
 
@@ -214,18 +251,17 @@ def predict_flight_reliability(
 # 6. Website Header
 # ==========================================
 
-st.title("✈️ Flight Reliability Checker")
+st.title("✈️ Flight Delay Risk Assessment")
 
 st.write(
-    "Helping airlines anticipate and manage flight delays "
-    "through data-driven predictions. Enter flight details "
-    "to estimate departure delay probabilities and assess "
-    "flight reliability."
+    "Supporting airlines in anticipating departure "
+    "delays and making informed operational decisions "
+    "through data-driven risk assessment."
 )
 
 st.divider()
 
-st.subheader("Flight Details")
+st.subheader("Flight Operational Details")
 
 # ==========================================
 # 7. Airline Selection
@@ -304,23 +340,6 @@ else:
             key="month"
         )
 
-        # Day of Week
-        day_options = [
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-            "Sunday"
-        ]
-
-        day_name = st.selectbox(
-            "Day of Week",
-            day_options,
-            key="day_of_week"
-        )
-
     with col2:
 
         holiday = st.selectbox(
@@ -332,7 +351,27 @@ else:
         )
 
     # ======================================
-    # 10. Departure Period
+    # 10. Day of Week
+    # ======================================
+
+    day_options = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+    ]
+
+    day_name = st.selectbox(
+        "Day of Week",
+        day_options,
+        key="day_of_week"
+    )
+
+    # ======================================
+    # 11. Departure Period
     # ======================================
 
     schedule = st.selectbox(
@@ -342,7 +381,7 @@ else:
     )
 
     # ======================================
-    # 11. Origin State
+    # 12. Origin State
     # ======================================
 
     origin = st.selectbox(
@@ -354,7 +393,7 @@ else:
     )
 
     # ======================================
-    # 12. Destination State
+    # 13. Destination State
     # ======================================
 
     if origin is not None:
@@ -390,19 +429,20 @@ else:
     )
 
     # ======================================
-    # 13. Prediction Button
+    # 14. Prediction Button
     # ======================================
 
     st.divider()
 
     st.caption(
-        "Weather conditions, historical passenger "
-        "volumes and previous-flight characteristics "
-        "are estimated using historical reference data."
+        "Historical passenger volumes, weather "
+        "conditions and previous-flight characteristics "
+        "are estimated from reference data. "
+        "These are not live operational measurements."
     )
 
     submitted = st.button(
-        "Predict Flight Reliability",
+        "Assess Delay Risk",
         type="primary",
         use_container_width=True,
         disabled=(
@@ -412,16 +452,15 @@ else:
     )
 
     # ======================================
-    # 14. Prediction Results
+    # 15. Prediction Results
     # ======================================
 
     if submitted:
 
         try:
 
-            # IMPORTANT:
-            # Adjust this mapping if your model
-            # uses a different day-of-week encoding.
+            # Verify this matches training encoding:
+            # Monday=0 through Sunday=6
             day_of_week = day_options.index(
                 day_name
             )
@@ -439,8 +478,12 @@ else:
             st.divider()
 
             st.subheader(
-                "Flight Reliability Results"
+                "Delay Risk Assessment"
             )
+
+            # --------------------------------
+            # Selected Operational Details
+            # --------------------------------
 
             with st.expander(
                 "Selected Flight Details",
@@ -477,12 +520,16 @@ else:
                     f"{'Yes' if holiday == 1 else 'No'}"
                 )
 
+            # --------------------------------
+            # Prediction Metrics
+            # --------------------------------
+
             col1, col2 = st.columns(2)
 
             with col1:
 
                 st.metric(
-                    "Delay Probability",
+                    "Predicted Delay Probability",
                     f"{result['Delay Probability (%)']}%"
                 )
 
@@ -493,10 +540,14 @@ else:
                     f"{result['Reliability Score']}/100"
                 )
 
+            # --------------------------------
+            # Operational Reliability Tier
+            # --------------------------------
+
             tier = result["Reliability Tier"]
 
             st.subheader(
-                "Flight Reliability Tier"
+                "Operational Reliability Tier"
             )
 
             if tier == "High Reliability":
@@ -506,8 +557,9 @@ else:
                 )
 
                 st.write(
-                    "This flight has a relatively "
-                    "low predicted risk of delay."
+                    "This flight has a relatively low "
+                    "predicted delay risk. Continue "
+                    "routine operational monitoring."
                 )
 
             elif tier == "Medium Reliability":
@@ -518,7 +570,9 @@ else:
 
                 st.write(
                     "This flight has a moderate "
-                    "predicted risk of delay."
+                    "predicted delay risk. Consider "
+                    "reviewing relevant operational "
+                    "conditions and monitoring updates."
                 )
 
             else:
@@ -528,19 +582,31 @@ else:
                 )
 
                 st.write(
-                    "This flight has a relatively "
-                    "high predicted risk of delay."
+                    "This flight has a relatively high "
+                    "predicted delay risk. Consider "
+                    "prioritising further operational "
+                    "assessment and contingency planning."
                 )
+
+            # --------------------------------
+            # Reliability Progress Bar
+            # --------------------------------
 
             st.progress(
                 result["Reliability Score"] / 100
             )
 
+            # --------------------------------
+            # Disclaimer
+            # --------------------------------
+
             st.caption(
-                "Predictions are based on historical "
-                "flight data and estimated conditions. "
-                "They do not guarantee actual "
-                "flight performance."
+                "This assessment uses historical "
+                "flight characteristics and estimated "
+                "operational conditions. Predictions "
+                "are probabilistic and do not guarantee "
+                "actual flight performance. Operational "
+                "recommendations are general guidance."
             )
 
         except Exception as e:
@@ -548,6 +614,63 @@ else:
             st.error(
                 f"Prediction error: {e}"
             )
+
+# ==========================================
+# 16. Model Information
+# ==========================================
+
+st.divider()
+
+with st.expander("About This Predictive Model"):
+
+    st.write(
+        "This tool estimates departure delay "
+        "probabilities using historical flight "
+        "performance, airline characteristics, "
+        "operational factors and weather variables."
+    )
+
+    st.write(
+        "The Flight Reliability Score (FRS) "
+        "is calculated as:"
+    )
+
+    st.latex(
+        r"FRS = (1 - P(\mathrm{Delay})) \times 100"
+    )
+
+    st.write("**Reliability Tier Classification**")
+
+    st.write(
+        "High Reliability: FRS ≥ 85"
+    )
+
+    st.write(
+        "Medium Reliability: 75 ≤ FRS < 85"
+    )
+
+    st.write(
+        "Low Reliability: FRS < 75"
+    )
+
+    st.write("**Model Limitations**")
+
+    st.write(
+        "The model relies on historical flight "
+        "performance and estimated operational "
+        "conditions. It does not directly incorporate "
+        "live weather forecasts, current aircraft "
+        "rotations or real-time flight disruptions."
+    )
+
+    st.write(
+        "Some input variables are automatically "
+        "populated using historical reference values "
+        "rather than flight-specific observations. "
+        "Predictions should therefore be interpreted "
+        "as indicative risk estimates."
+    )
+
 
 
 
