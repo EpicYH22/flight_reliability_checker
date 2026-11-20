@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. Load Model and Historical Data
+# 2. Load Model and Historical Files
 # ==========================================
 
 @st.cache_resource
@@ -38,69 +38,162 @@ lookups = load_lookups()
 flight_options = load_flight_options()
 
 # ==========================================
-# 3. Prediction Function
+# 3. Model Features
+# ==========================================
+
+model_features = [
+    "month",
+    "day_of_week",
+    "op_unique_carrier",
+    "schedule",
+    "distance_group",
+    "is_holiday",
+    "carrier_historical_delay_rate",
+    "origin_historical_delay_rate",
+    "destination_historical_delay_rate",
+    "avg_aircraft_seats",
+    "historical_passengers",
+    "historical_load_factor",
+    "historical_departures",
+    "temperature_2m",
+    "precipitation",
+    "rain",
+    "snowfall",
+    "wind_speed_10m",
+    "wind_gusts_10m",
+    "cloud_cover",
+    "is_first_flight",
+    "previous_flight_departure_delay"
+]
+
+# ==========================================
+# 4. Historical Lookup Function
+# ==========================================
+
+def get_historical_values(
+    carrier, origin, destination, month
+):
+
+    exact_key = (
+        carrier,
+        origin,
+        destination,
+        month
+    )
+
+    route_key = (
+        carrier,
+        origin,
+        destination
+    )
+
+    exact_data = lookups["exact"].get(
+        exact_key, {}
+    )
+
+    route_data = lookups["route"].get(
+        route_key, {}
+    )
+
+    carrier_data = lookups["carrier"].get(
+        carrier, {}
+    )
+
+    global_data = lookups["global"]
+
+    values = {}
+
+    features = (
+        lookups["numerical_features"]
+        + ["distance_group"]
+    )
+
+    # Select the most specific available value
+    for feature in features:
+
+        candidates = [
+            exact_data.get(feature),
+            route_data.get(feature),
+            carrier_data.get(feature),
+            global_data.get(feature)
+        ]
+
+        value = next(
+            (
+                x for x in candidates
+                if x is not None
+                and pd.notna(x)
+            ),
+            None
+        )
+
+        if value is None:
+            raise ValueError(
+                f"No historical value for {feature}"
+            )
+
+        values[feature] = value
+
+    return values
+
+
+# ==========================================
+# 5. Prediction Function
 # ==========================================
 
 def predict_flight_reliability(
     month,
+    day_of_week,
     carrier,
+    schedule,
     origin,
     destination,
-    day_type,
-    schedule,
-    holiday,
-    bad_weather
+    holiday
 ):
 
-    # Retrieve historical airline information
-    carrier_data = lookups["carrier"][carrier]
-
-    # Retrieve historical state delay rates
-    origin_delay = lookups["origin"][origin]
-    destination_delay = lookups["destination"][destination]
-
-    # Retrieve typical distance category
-    distance = lookups["distance"].get(
-        (carrier, origin, destination)
+    historical = get_historical_values(
+        carrier,
+        origin,
+        destination,
+        month
     )
 
-    if distance is None:
+    input_values = {
+        "month": month,
+        "day_of_week": day_of_week,
+        "op_unique_carrier": carrier,
+        "schedule": schedule,
+        "is_holiday": holiday
+    }
+
+    input_values.update(historical)
+
+    input_data = pd.DataFrame(
+        [input_values]
+    )
+
+    # Ensure all model features exist
+    missing = [
+        col for col in model_features
+        if col not in input_data.columns
+    ]
+
+    if missing:
         raise ValueError(
-            "No historical distance category is available "
-            "for the selected airline and route."
+            f"Missing model predictors: {missing}"
         )
 
-    # Construct all 14 model predictors
-    input_data = pd.DataFrame([{
-        "month": month,
-        "op_unique_carrier": carrier,
-        "origin_state_nm": origin,
-        "dest_state_nm": destination,
-        "day_type": day_type,
-        "schedule": schedule,
-        "distance_group": distance,
-        "is_holiday": holiday,
-        "bad_weather": bad_weather,
-        "carrier_historical_delay_rate":
-            carrier_data["carrier_historical_delay_rate"],
-        "origin_historical_delay_rate": origin_delay,
-        "destination_historical_delay_rate": destination_delay,
-        "avg_aircraft_seats":
-            carrier_data["avg_aircraft_seats"],
-        "historical_load_factor":
-            carrier_data["historical_load_factor"]
-    }])
-
-    # Match model feature order
-    input_data = input_data[list(model.feature_names_in_)]
+    input_data = input_data[model_features]
 
     # Predict delay probability
-    delay_probability = model.predict_proba(input_data)[0, 1]
+    delay_probability = (
+        model.predict_proba(input_data)[0, 1]
+    )
 
-    # Calculate Flight Reliability Score
-    reliability_score = (1 - delay_probability) * 100
+    reliability_score = (
+        1 - delay_probability
+    ) * 100
 
-    # Assign reliability tier
     if reliability_score >= 85:
         tier = "High Reliability"
     elif reliability_score >= 75:
@@ -109,18 +202,16 @@ def predict_flight_reliability(
         tier = "Low Reliability"
 
     return {
-        "Delay Probability (%)": round(
-            delay_probability * 100, 2
-        ),
-        "Reliability Score": round(
-            reliability_score, 2
-        ),
+        "Delay Probability (%)":
+            round(delay_probability * 100, 2),
+        "Reliability Score":
+            round(reliability_score, 2),
         "Reliability Tier": tier
     }
 
 
 # ==========================================
-# 4. Website Header
+# 6. Website Header
 # ==========================================
 
 st.title("✈️ Flight Reliability Checker")
@@ -133,15 +224,11 @@ st.write(
 
 st.divider()
 
-# ==========================================
-# 5. Flight Details
-# ==========================================
-
 st.subheader("Flight Details")
 
-# ------------------------------------------
-# 5.1 Airline Selection
-# ------------------------------------------
+# ==========================================
+# 7. Airline Selection
+# ==========================================
 
 airlines = sorted(
     flight_options["op_unique_carrier"]
@@ -167,7 +254,6 @@ if carrier is None:
 
 else:
 
-    # Filter records for selected airline
     airline_df = flight_options[
         flight_options["op_unique_carrier"] == carrier
     ].copy()
@@ -176,19 +262,12 @@ else:
         f"Showing historical flight options for {carrier}"
     )
 
-    # --------------------------------------
-    # 5.2 Available Options
-    # --------------------------------------
+    # ======================================
+    # 8. Available Dropdown Options
+    # ======================================
 
     months = sorted(
         airline_df["month"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-
-    day_types = sorted(
-        airline_df["day_type"]
         .dropna()
         .unique()
         .tolist()
@@ -209,14 +288,13 @@ else:
     )
 
     # ======================================
-    # 5.3 Two-Column Flight Details
+    # 9. Two-Column Inputs
     # ======================================
 
     col1, col2 = st.columns(2)
 
     with col1:
 
-        # Departure Month
         month = st.selectbox(
             "Departure Month",
             months,
@@ -225,16 +303,25 @@ else:
             key="month"
         )
 
-        # Day Type
-        day_type = st.selectbox(
-            "Day Type",
-            day_types,
-            key="day_type"
+        # Day of Week
+        day_options = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday"
+        ]
+
+        day_name = st.selectbox(
+            "Day of Week",
+            day_options,
+            key="day_of_week"
         )
 
     with col2:
 
-        # National Holiday
         holiday = st.selectbox(
             "National Holiday",
             [0, 1],
@@ -243,17 +330,8 @@ else:
             key="holiday"
         )
 
-        # Bad Weather
-        bad_weather = st.selectbox(
-            "Bad Weather",
-            [0, 1],
-            format_func=lambda x:
-                "Yes" if x == 1 else "No",
-            key="bad_weather"
-        )
-
     # ======================================
-    # 5.4 Departure Period - Full Width
+    # 10. Departure Period
     # ======================================
 
     schedule = st.selectbox(
@@ -263,7 +341,7 @@ else:
     )
 
     # ======================================
-    # 5.5 Origin State - Full Width
+    # 11. Origin State
     # ======================================
 
     origin = st.selectbox(
@@ -275,7 +353,7 @@ else:
     )
 
     # ======================================
-    # 5.6 Destination State - Full Width
+    # 12. Destination State
     # ======================================
 
     if origin is not None:
@@ -294,10 +372,10 @@ else:
     else:
         destinations = []
 
-    # Reset destination if no longer valid
     if (
         "destination" in st.session_state
-        and st.session_state["destination"] not in destinations
+        and st.session_state["destination"]
+        not in destinations
     ):
         st.session_state["destination"] = None
 
@@ -311,10 +389,16 @@ else:
     )
 
     # ======================================
-    # 5.7 Prediction Button
+    # 13. Prediction Button
     # ======================================
 
     st.divider()
+
+    st.caption(
+        "Weather conditions, historical passenger "
+        "volumes and previous-flight characteristics "
+        "are estimated using historical reference data."
+    )
 
     submitted = st.button(
         "Predict Flight Reliability",
@@ -327,22 +411,28 @@ else:
     )
 
     # ======================================
-    # 6. Prediction Results
+    # 14. Prediction Results
     # ======================================
 
     if submitted:
 
         try:
 
+            # IMPORTANT:
+            # Adjust this mapping if your model
+            # uses a different day-of-week encoding.
+            day_of_week = day_options.index(
+                day_name
+            )
+
             result = predict_flight_reliability(
                 month,
+                day_of_week,
                 carrier,
+                schedule,
                 origin,
                 destination,
-                day_type,
-                schedule,
-                holiday,
-                bad_weather
+                holiday
             )
 
             st.divider()
@@ -350,10 +440,6 @@ else:
             st.subheader(
                 "Flight Reliability Results"
             )
-
-            # --------------------------------
-            # Selected Flight Details
-            # --------------------------------
 
             with st.expander(
                 "Selected Flight Details",
@@ -370,6 +456,14 @@ else:
                 )
 
                 st.write(
+                    f"**Day of Week:** {day_name}"
+                )
+
+                st.write(
+                    f"**Departure Period:** {schedule}"
+                )
+
+                st.write(
                     f"**Origin:** {origin}"
                 )
 
@@ -378,26 +472,9 @@ else:
                 )
 
                 st.write(
-                    f"**Day Type:** {day_type}"
-                )
-
-                st.write(
-                    f"**Departure Period:** {schedule}"
-                )
-
-                st.write(
                     f"**National Holiday:** "
                     f"{'Yes' if holiday == 1 else 'No'}"
                 )
-
-                st.write(
-                    f"**Bad Weather:** "
-                    f"{'Yes' if bad_weather == 1 else 'No'}"
-                )
-
-            # --------------------------------
-            # Prediction Metrics
-            # --------------------------------
 
             col1, col2 = st.columns(2)
 
@@ -415,10 +492,6 @@ else:
                     f"{result['Reliability Score']}/100"
                 )
 
-            # --------------------------------
-            # Reliability Tier
-            # --------------------------------
-
             tier = result["Reliability Tier"]
 
             st.subheader(
@@ -433,8 +506,7 @@ else:
 
                 st.write(
                     "This flight has a relatively "
-                    "low predicted risk of "
-                    "departure delay."
+                    "low predicted risk of delay."
                 )
 
             elif tier == "Medium Reliability":
@@ -445,8 +517,7 @@ else:
 
                 st.write(
                     "This flight has a moderate "
-                    "predicted risk of "
-                    "departure delay."
+                    "predicted risk of delay."
                 )
 
             else:
@@ -457,28 +528,18 @@ else:
 
                 st.write(
                     "This flight has a relatively "
-                    "high predicted risk of "
-                    "departure delay."
+                    "high predicted risk of delay."
                 )
-
-            # --------------------------------
-            # Reliability Progress Bar
-            # --------------------------------
 
             st.progress(
                 result["Reliability Score"] / 100
             )
 
-            # --------------------------------
-            # Disclaimer
-            # --------------------------------
-
             st.caption(
-                "The Flight Reliability Score is "
-                "calculated using historical flight "
-                "characteristics and predicted delay "
-                "probabilities. It is not a guarantee "
-                "of actual flight performance."
+                "Predictions are based on historical "
+                "flight data and estimated conditions. "
+                "They do not guarantee actual "
+                "flight performance."
             )
 
         except Exception as e:
