@@ -9,7 +9,7 @@ import calendar
 # ==========================================
 
 st.set_page_config(
-    page_title="Flight Delay Risk Assessment",
+    page_title="Flight Reliability Checker",
     page_icon="✈️",
     layout="centered"
 )
@@ -66,6 +66,7 @@ model_features = [
     "previous_flight_departure_delay"
 ]
 
+# Validate lookup structure
 required_lookup_keys = {
     "exact",
     "route",
@@ -85,16 +86,12 @@ if missing_lookup_keys:
     )
     st.stop()
 
+# Validate model features
 if hasattr(model, "feature_names_in_"):
-    missing_model_features = (
-        set(model_features) -
-        set(model.feature_names_in_)
-    )
-
-    if missing_model_features:
+    if set(model.feature_names_in_) != set(model_features):
         st.error(
-            "The saved model does not contain all "
-            "22 expected predictors."
+            "The saved model features do not match "
+            "the expected 22 predictors."
         )
         st.stop()
 
@@ -251,12 +248,13 @@ def predict_flight_reliability(
 # 6. Website Header
 # ==========================================
 
-st.title("✈️ Flight Delay Risk Assessment")
+st.title("✈️ Flight Reliability Checker")
 
 st.write(
-    "Supporting airlines in anticipating departure "
-    "delays and making informed operational decisions "
-    "through data-driven risk assessment."
+    "Helping airlines anticipate and manage flight "
+    "delays through data-driven predictions. Enter "
+    "flight details to estimate departure delay "
+    "probabilities and assess flight reliability."
 )
 
 st.divider()
@@ -442,7 +440,7 @@ else:
     )
 
     submitted = st.button(
-        "Assess Delay Risk",
+        "Predict Flight Reliability",
         type="primary",
         use_container_width=True,
         disabled=(
@@ -459,8 +457,8 @@ else:
 
         try:
 
-            # Verify this matches training encoding:
-            # Monday=0 through Sunday=6
+            # Confirm encoding matches training data
+            # Assumes Monday=0 through Sunday=6
             day_of_week = day_options.index(
                 day_name
             )
@@ -478,11 +476,11 @@ else:
             st.divider()
 
             st.subheader(
-                "Delay Risk Assessment"
+                "Flight Reliability Results"
             )
 
             # --------------------------------
-            # Selected Operational Details
+            # Selected Flight Details
             # --------------------------------
 
             with st.expander(
@@ -541,13 +539,13 @@ else:
                 )
 
             # --------------------------------
-            # Operational Reliability Tier
+            # Flight Reliability Tier
             # --------------------------------
 
             tier = result["Reliability Tier"]
 
             st.subheader(
-                "Operational Reliability Tier"
+                "Flight Reliability Tier"
             )
 
             if tier == "High Reliability":
@@ -616,7 +614,7 @@ else:
             )
 
 # ==========================================
-# 16. Model Information
+# 16. About This Predictive Model
 # ==========================================
 
 st.divider()
