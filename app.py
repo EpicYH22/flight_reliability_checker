@@ -217,9 +217,10 @@ def predict_flight_reliability(
 st.title("✈️ Flight Reliability Checker")
 
 st.write(
-    "Planning your next flight? Select your airline "
-    "and enter your flight details to estimate "
-    "the probability of a departure delay."
+    "Helping airlines anticipate and manage flight delays "
+    "through data-driven predictions. Enter flight details "
+    "to estimate departure delay probabilities and assess "
+    "flight reliability."
 )
 
 st.divider()
